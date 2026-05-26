@@ -1,0 +1,9 @@
+[Unit]
+Description=Run scanner archive job periodically
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

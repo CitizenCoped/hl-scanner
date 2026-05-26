@@ -1,0 +1,12 @@
+[Unit]
+Description=Scanner Ingestor
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hl-scanner
+ExecStart=/usr/bin/python -m scanner.ws_client
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

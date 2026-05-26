@@ -1,0 +1,12 @@
+[Unit]
+Description=Scanner Feature Worker
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hl-scanner
+ExecStart=/usr/bin/python -m scanner.features
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

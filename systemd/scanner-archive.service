@@ -1,0 +1,8 @@
+[Unit]
+Description=Scanner Archive to S3
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/hl-scanner
+ExecStart=/usr/bin/python -m scanner.archive_to_s3

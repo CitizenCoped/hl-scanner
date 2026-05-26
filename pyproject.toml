@@ -1,0 +1,11 @@
+[project]
+name = "hl-scanner"
+version = "0.1.0"
+description = "High-level scanner"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"

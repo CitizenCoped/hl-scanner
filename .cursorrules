@@ -1,0 +1,69 @@
+# Cursor Agent Rules — Hyperliquid Scanner
+
+This file is Cursor's persistent context. Every prompt grounds in it.
+The full architecture lives in BUILD_GUIDE.md; the build sequence in CURSOR_PROMPTS.md.
+When in doubt, read those — do not improvise.
+
+## Read first, every prompt
+- BUILD_GUIDE.md is the single source of truth for architecture and code.
+- CURSOR_PROMPTS.md is the build order. Do not skip ahead.
+- If a request conflicts with either file, stop and ask before proceeding.
+
+## Code conventions
+- Python 3.12 only. No 3.11, no 3.13.
+- uv for dependency management. Never run `pip install` directly.
+- polars for DataFrames. Never pandas.
+- psycopg v3 (the `psycopg` package). Never psycopg2.
+- structlog for logging in src/scanner/. Never bare print() outside of __main__ smoke tests.
+- Raw psycopg with parameterized queries. No ORM — no SQLAlchemy, no Tortoise, no Peewee.
+- DuckDB for analytical queries over Parquet. In-memory connections only; no persistent .duckdb files.
+- All timestamps are UTC. Never call datetime.now() without timezone.utc.
+- Hour-of-day bucket: (ts_ms // 3_600_000) % 24.
+
+## Critical correctness rules (these have burned the project before)
+1. **No look-ahead bias.** Signals at minute t use bars closed at <= t-1 only. The z-score baseline excludes the asof minute strictly.
+2. **min_obs=30 floor.** Return NaN from z-score calculation if fewer than 30 same-hour samples exist. The DuckDB QUALIFY clause in features.py enforces this — do not remove it.
+3. **HL prices are decimal strings.** Hyperliquid serializes px and sz as strings. Wrap every float() call on incoming WS data in try/except. On parse failure, log a warning and skip the record. Never crash the ingestor.
+4. **bbo nulls.** WsBbo.bbo is [bid|null, ask|null]; either side may be null. Handle gracefully — skip the markout for that horizon rather than crashing.
+5. **No browser storage APIs.** N/A here, but a reminder: this is a backend service with no client storage.
+
+## Architecture (FIXED — do not redesign without asking)
+Four Python processes supervised by systemd, plus a sidecar valkey-server:
+1. `ingestor`        → WebSocket → Valkey streams (hl:trades, hl:l2Book, hl:activeAssetCtx)
+2. `feature_worker`  → Valkey streams → 1-min OHLCV bars → Parquet on /opt/scanner/data
+3. `alerter`         → DuckDB queries Parquet → z-scores → INSERT alerts to RDS Postgres
+4. `markouts`        → polls alerts → schedules mid lookups at +30s/+5m/+30m/+4h → INSERT markouts to RDS
+5. `valkey-server`   → sidecar, listening on Unix socket /run/valkey/valkey.sock
+
+Plus a nightly scanner-archive.timer that runs scanner-archive.service.
+
+## Hosting (FIXED — do not redesign without asking)
+- AWS region: ap-northeast-1 (Tokyo) — and only ap-northeast-1.
+- Compute: c7g.2xlarge (Graviton3, 8 vCPU / 16 GiB), public subnet, Elastic IP.
+- Block storage: EBS gp3, 200 GB, mounted at /opt/scanner/data.
+- Database: RDS PostgreSQL 16, db.t4g.micro, Single-AZ, in private subnets.
+- Cache/streams: sidecar Valkey on the EC2 host via Unix socket. Not ElastiCache.
+- Object storage: S3 Standard with lifecycle to Standard-IA at 30d, Glacier IR at 180d.
+- Networking: one VPC (10.10.0.0/16), one public subnet for EC2, two private subnets for RDS.
+  Free VPC Gateway Endpoint for S3. NO NAT Gateway.
+- Process supervision: systemd. Not honcho, not supervisord, not Docker.
+
+## Never do
+- **Never suggest a different cloud provider.** No GCP, Azure, DigitalOcean, Replit, Linode, Fly.io, Render, Railway. AWS only.
+- **Never suggest a US-based AWS region.** Not us-east-1, not us-west-2, not anywhere in the US. ap-northeast-1 only.
+- **Never carry over patterns from prior platform attempts.** No `replit.md`, no `.replit`, no `Procfile`, no honcho, no Nix, no `doctl`, no DO Spaces, no `provision_do.sh`. If you find a reference to any of these, it is stale — flag it for removal.
+- **Never use AWS STS global endpoint.** Always use the regional endpoint: set `AWS_STS_REGIONAL_ENDPOINTS=regional` and `AWS_DEFAULT_REGION=ap-northeast-1` in any shell or boto3 context. (These env vars keep traffic in Tokyo — they are the FIX for the US-routing problem, not the cause of it.)
+- **Never hardcode AWS access keys in Python code.** The EC2 instance uses an IAM instance profile; boto3 picks credentials up automatically. `boto3.client('s3', region_name='ap-northeast-1')` is correct — no `aws_access_key_id=` parameter.
+- **Never hardcode connection strings.** POSTGRES_URL, S3_BUCKET, and similar come from environment variables loaded from .env.production. Never inline.
+- **Never add a NAT Gateway** to the Terraform. The architecture intentionally uses public subnet + EIP + tight security groups.
+- **Never add a web framework.** No Flask, FastAPI, Starlette, Django, aiohttp server. This is a background-process service. If you think you need an HTTP endpoint, ask first.
+- **Never make the Terraform region variable flexible with a default of ap-northeast-1.** The region guard in §16 hard-fails any other region; respect that contract — do not soften it with a default.
+- **Never modify more than the files needed for the current prompt.** If a prompt asks for one file, change one file. Do not "improve" adjacent code.
+- **Never skip the smoke test** at the end of each prompt in CURSOR_PROMPTS.md. The smoke test is part of the deliverable.
+
+## When asked to change architecture
+Respond: "This conflicts with BUILD_GUIDE.md §[X]. Do you want me to (a) implement as specified, or (b) update BUILD_GUIDE.md first?" Do not silently deviate.
+
+## Reference
+- BUILD_GUIDE.md  — full architecture, hosting, code, and ops runbook
+- CURSOR_PROMPTS.md — the 10-prompt sequence; follow in order

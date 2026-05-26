@@ -1,0 +1,12 @@
+[Unit]
+Description=Scanner Markouts
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hl-scanner
+ExecStart=/usr/bin/python -m scanner.markouts
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Scanner Alerter
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/hl-scanner
+ExecStart=/usr/bin/python -m scanner.alerter
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
