@@ -51,6 +51,8 @@ Alert fires when `|z| > 4.0` AND the minute's notional volume is in the top deci
 
 **Local Parquet (hot lake on `/opt/scanner/data`)** — Hive-style partitions, one file per hour, ZSTD-compressed:
 
+> SE-approved deviation: the implementation writes one immutable Parquet file per minute (`dt=YYYY-MM-DD/{minute_ts}.parquet`) rather than a single long-open per-hour file. A per-hour `ParquetWriter` left files without a footer until `close()`, so DuckDB readers (the alerter's z-score query and the dashboard exporter) failed with "No magic bytes" on any in-progress or restart-abandoned file. Per-minute files are always complete and readable.
+
 ```
 /opt/scanner/data/
 ├── bars/coin=BTC/dt=2026-05-25/000.parquet
