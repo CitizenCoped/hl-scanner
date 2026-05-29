@@ -96,6 +96,9 @@ RestartSec=2s
 WantedBy=multi-user.target
 EOF
 
+# SE-approved deviation from BUILD_GUIDE §18: these units log to files under
+# $APP/logs instead of journald so the released CloudWatch agent's "files"
+# collector can ship them (the agent's journald collector is unreleased).
 for svc in ingestor feature-worker alerter markouts; do
   case "$svc" in
     ingestor) module="ws_client" ;;
@@ -163,6 +166,8 @@ chown -R scanner:scanner $APP/.aws
 # 7. CloudWatch agent — ship the four service log files at Infrequent-Access
 # class, 7-day retention. (The released agent's log collector reads files; the
 # services write to $APP/logs/*.log via systemd StandardOutput=append.)
+# SE-approved deviation from BUILD_GUIDE §18: uses the "files" collector instead
+# of "journald", which the released CloudWatch agent does not yet support.
 cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<EOF
 {
   "logs": {
