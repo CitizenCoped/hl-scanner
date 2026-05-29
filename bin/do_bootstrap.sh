@@ -19,17 +19,23 @@ apt-get install -y --no-install-recommends \
   build-essential git tmux jq curl ca-certificates \
   postgresql-client-16 valkey-server xfsprogs unzip
 
-# uv
-if ! command -v uv >/dev/null; then
+# uv — install then copy the binary to a world-readable location so the
+# unprivileged `scanner` user can execute it (a symlink into /root is not
+# traversable by other users).
+if [[ ! -x /usr/local/bin/uv ]]; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
-  ln -sf /root/.local/bin/uv /usr/local/bin/uv
+  install -m 755 /root/.local/bin/uv /usr/local/bin/uv
 fi
 
-# s5cmd
+# s5cmd — resolve the correct arm64 asset from the GitHub API; non-fatal so a
+# transient download hiccup never blocks the rest of bootstrap.
 if ! command -v s5cmd >/dev/null; then
-  ARCH=$(uname -m | sed s/aarch64/arm64/)
-  curl -L "https://github.com/peak/s5cmd/releases/latest/download/s5cmd_${ARCH}_Linux.tar.gz" \
-    | tar xz -C /usr/local/bin s5cmd
+  S5_URL=$(curl -fsSL https://api.github.com/repos/peak/s5cmd/releases/latest \
+    | jq -r '.assets[].browser_download_url' \
+    | grep -Ei 'Linux.*(arm64).*\.tar\.gz$' | head -n1 || true)
+  if [[ -n "$S5_URL" ]]; then
+    curl -fsSL "$S5_URL" | tar xz -C /usr/local/bin s5cmd || true
+  fi
 fi
 
 # CloudWatch agent
@@ -65,6 +71,12 @@ maxmemory-policy allkeys-lru
 save ""
 appendonly no
 EOF
+
+# The valkey deb ships /etc/valkey owned valkey:valkey mode 750, which the
+# scanner user cannot read. Grant read access via group ownership.
+chown root:scanner /etc/valkey /etc/valkey/valkey.conf
+chmod 750 /etc/valkey
+chmod 640 /etc/valkey/valkey.conf
 
 # 5. systemd units
 cat > /etc/systemd/system/scanner-valkey.service <<'EOF'
@@ -106,8 +118,8 @@ Restart=always
 RestartSec=5s
 StartLimitBurst=10
 StartLimitIntervalSec=60
-StandardOutput=journal
-StandardError=journal
+StandardOutput=append:$APP/logs/$svc.log
+StandardError=append:$APP/logs/$svc.log
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -148,17 +160,19 @@ sts_regional_endpoints = regional
 EOF
 chown -R scanner:scanner $APP/.aws
 
-# 7. CloudWatch agent — ship the four journals at Infrequent-Access class, 7-day retention
+# 7. CloudWatch agent — ship the four service log files at Infrequent-Access
+# class, 7-day retention. (The released agent's log collector reads files; the
+# services write to $APP/logs/*.log via systemd StandardOutput=append.)
 cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<EOF
 {
   "logs": {
     "logs_collected": {
-      "journald": {
+      "files": {
         "collect_list": [
-          {"unit":"scanner-ingestor.service",       "log_group_name":"/scanner/ingestor",       "log_stream_name":"{instance_id}","log_group_class":"INFREQUENT_ACCESS","retention_in_days":7},
-          {"unit":"scanner-feature-worker.service", "log_group_name":"/scanner/feature-worker", "log_stream_name":"{instance_id}","log_group_class":"INFREQUENT_ACCESS","retention_in_days":7},
-          {"unit":"scanner-alerter.service",        "log_group_name":"/scanner/alerter",        "log_stream_name":"{instance_id}","log_group_class":"INFREQUENT_ACCESS","retention_in_days":7},
-          {"unit":"scanner-markouts.service",       "log_group_name":"/scanner/markouts",       "log_stream_name":"{instance_id}","log_group_class":"INFREQUENT_ACCESS","retention_in_days":7}
+          {"file_path":"$APP/logs/ingestor.log",       "log_group_name":"/scanner/ingestor",       "log_stream_name":"{instance_id}","log_group_class":"INFREQUENT_ACCESS","retention_in_days":7},
+          {"file_path":"$APP/logs/feature-worker.log", "log_group_name":"/scanner/feature-worker", "log_stream_name":"{instance_id}","log_group_class":"INFREQUENT_ACCESS","retention_in_days":7},
+          {"file_path":"$APP/logs/alerter.log",        "log_group_name":"/scanner/alerter",        "log_stream_name":"{instance_id}","log_group_class":"INFREQUENT_ACCESS","retention_in_days":7},
+          {"file_path":"$APP/logs/markouts.log",       "log_group_name":"/scanner/markouts",       "log_stream_name":"{instance_id}","log_group_class":"INFREQUENT_ACCESS","retention_in_days":7}
         ]
       }
     }

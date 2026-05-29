@@ -14,8 +14,8 @@ Restart=always
 RestartSec=5s
 StartLimitBurst=10
 StartLimitIntervalSec=60
-StandardOutput=journal
-StandardError=journal
+StandardOutput=append:/opt/scanner/logs/ingestor.log
+StandardError=append:/opt/scanner/logs/ingestor.log
 
 [Install]
 WantedBy=multi-user.target

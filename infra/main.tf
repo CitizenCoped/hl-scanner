@@ -139,6 +139,12 @@ resource "aws_iam_instance_profile" "scanner" {
   role = aws_iam_role.scanner.name
 }
 
+# Allows the CloudWatch agent to ship journ/service logs and metrics.
+resource "aws_iam_role_policy_attachment" "scanner_cw_agent" {
+  role       = aws_iam_role.scanner.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
 # ---------- S3 ----------
 resource "aws_s3_bucket" "lake" {
   bucket        = "hl-scanner-${var.account_id}-${var.region}"
@@ -194,6 +200,13 @@ resource "aws_instance" "scanner" {
     encrypted   = true
   }
   tags = { Name = "hl-scanner" }
+
+  # The attached EIP makes AWS report associate_public_ip_address=true, which
+  # otherwise forces instance replacement on every apply. Ignore AMI churn too
+  # so a newer published image never silently destroys this stateful host.
+  lifecycle {
+    ignore_changes = [associate_public_ip_address, ami]
+  }
 }
 resource "aws_ebs_volume" "data" {
   availability_zone = aws_subnet.public.availability_zone
