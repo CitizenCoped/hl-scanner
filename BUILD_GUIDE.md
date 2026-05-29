@@ -940,6 +940,8 @@ RestartSec=2s
 WantedBy=multi-user.target
 EOF
 
+# SE-approved deviation: the implementation logs to $APP/logs/$svc.log (StandardOutput=append)
+# instead of journald so the released CloudWatch agent's "files" collector can ship the logs.
 for svc in ingestor feature-worker alerter markouts; do
   module="${svc//-/_}"
   cat > /etc/systemd/system/scanner-$svc.service <<EOF
@@ -1001,6 +1003,8 @@ EOF
 chown -R scanner:scanner $APP/.aws
 
 # 7. CloudWatch agent — ship the four journals at Infrequent-Access class, 7-day retention
+# SE-approved deviation: the implementation uses the "files" collector (reading $APP/logs/*.log)
+# instead of the "journald" collector shown below, which the released CloudWatch agent rejects.
 cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<EOF
 {
   "logs": {
