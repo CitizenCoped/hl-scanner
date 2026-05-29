@@ -129,7 +129,9 @@ resource "aws_iam_role_policy" "scanner_s3" {
       Action = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket"],
       Resource = [
         "arn:aws:s3:::hl-scanner-${var.account_id}-${var.region}",
-        "arn:aws:s3:::hl-scanner-${var.account_id}-${var.region}/*"
+        "arn:aws:s3:::hl-scanner-${var.account_id}-${var.region}/*",
+        "arn:aws:s3:::hl-scanner-dashboard-${var.account_id}-${var.region}",
+        "arn:aws:s3:::hl-scanner-dashboard-${var.account_id}-${var.region}/*"
       ]
     }]
   })
@@ -171,6 +173,75 @@ resource "aws_s3_bucket_lifecycle_configuration" "lake" {
       storage_class = "GLACIER_IR"
     }
   }
+}
+
+# ---------- Dashboard (private S3 origin + CloudFront via OAC) ----------
+resource "aws_s3_bucket" "dashboard" {
+  bucket        = "hl-scanner-dashboard-${var.account_id}-${var.region}"
+  force_destroy = true
+}
+resource "aws_s3_bucket_public_access_block" "dashboard" {
+  bucket                  = aws_s3_bucket.dashboard.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+resource "aws_cloudfront_origin_access_control" "dashboard" {
+  name                              = "hl-scanner-dashboard-oac"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+resource "aws_cloudfront_distribution" "dashboard" {
+  enabled             = true
+  default_root_object = "index.html"
+  comment             = "hl-scanner dashboard"
+  price_class         = "PriceClass_200"
+
+  origin {
+    domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
+    origin_id                = "dashboard-s3"
+    origin_access_control_id = aws_cloudfront_origin_access_control.dashboard.id
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "dashboard-s3"
+    viewer_protocol_policy = "redirect-to-https"
+    # AWS managed "CachingOptimized" policy; honors origin Cache-Control, so
+    # stats.json (max-age=30) refreshes ~every 30s at the edge.
+    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+resource "aws_s3_bucket_policy" "dashboard" {
+  bucket = aws_s3_bucket.dashboard.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Sid       = "AllowCloudFrontOAC",
+      Effect    = "Allow",
+      Principal = { Service = "cloudfront.amazonaws.com" },
+      Action    = "s3:GetObject",
+      Resource  = "${aws_s3_bucket.dashboard.arn}/*",
+      Condition = {
+        StringEquals = {
+          "AWS:SourceArn" = aws_cloudfront_distribution.dashboard.arn
+        }
+      }
+    }]
+  })
 }
 
 # ---------- EC2 ----------

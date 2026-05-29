@@ -18,3 +18,11 @@ output "s3_bucket" {
 output "region" {
   value = var.region
 }
+
+output "dashboard_bucket" {
+  value = aws_s3_bucket.dashboard.id
+}
+
+output "dashboard_url" {
+  value = "https://${aws_cloudfront_distribution.dashboard.domain_name}"
+}

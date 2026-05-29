@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HL Scanner Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0b0f17; --panel: #131a26; --panel2: #1a2433; --line: #243044;
+    --text: #e6edf6; --muted: #8aa0b8; --accent: #4ea1ff; --good: #3ad29f; --warn: #ffb454; --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: baseline; justify-content: space-between;
+    padding: 18px 24px; border-bottom: 1px solid var(--line); flex-wrap: wrap; gap: 8px; }
+  h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  h1 span { color: var(--accent); }
+  .meta { color: var(--muted); font-size: 12px; }
+  .wrap { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .card .value { font-size: 24px; font-weight: 650; margin-top: 4px; }
+  .card .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  @media (max-width: 820px) { .grid2 { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
+  .scroll { max-height: 460px; overflow: auto; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; }
+  .badge.on { background: rgba(58,210,159,.15); color: var(--good); }
+  .badge.off { background: rgba(138,160,184,.15); color: var(--muted); }
+  .z { font-variant-numeric: tabular-nums; }
+  .z.hot { color: var(--bad); font-weight: 650; }
+  .err { color: var(--bad); }
+  .dot { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot.live { background: var(--good); } .dot.stale { background: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>HL <span>Scanner</span> Dashboard</h1>
+  <div class="meta" id="meta">loading...</div>
+</header>
+<div class="wrap">
+  <div class="cards" id="cards"></div>
+  <div class="grid2">
+    <div class="panel"><h2>Top coins by 24h notional</h2><canvas id="volChart" height="220"></canvas></div>
+    <div class="panel"><h2>Recent alerts</h2><div class="scroll"><table id="alertsTbl">
+      <thead><tr><th>Coin</th><th>z</th><th>ret</th><th>notional</th><th>time</th></tr></thead>
+      <tbody></tbody></table></div></div>
+  </div>
+  <div class="panel">
+    <h2>Per-coin coverage</h2>
+    <div class="scroll"><table id="coinTbl">
+      <thead><tr><th>Coin</th><th>24h notional</th><th>bars 24h</th><th>last bar</th><th>alerts 24h</th><th>status</th></tr></thead>
+      <tbody></tbody></table></div>
+  </div>
+</div>
+<script>
+const fmtUsd = n => n == null ? "-" : "$" + (
+  n >= 1e9 ? (n/1e9).toFixed(2)+"B" : n >= 1e6 ? (n/1e6).toFixed(1)+"M" : n >= 1e3 ? (n/1e3).toFixed(1)+"K" : n.toFixed(0));
+const fmtNum = n => n == null ? "-" : n.toLocaleString();
+const ago = ts => {
+  if (!ts) return "-";
+  const s = Math.floor(Date.now()/1000 - ts);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.floor(s/60) + "m ago";
+  if (s < 86400) return Math.floor(s/3600) + "h ago";
+  return Math.floor(s/86400) + "d ago";
+};
+let volChart;
+
+function render(d) {
+  const a = d.alerts || {}, streams = d.streams || {}, data = d.data || {};
+  const universe = d.universe || [], bars = d.bars || {};
+  const gen = d.generated_at ? new Date(d.generated_at) : null;
+  const stale = gen ? (Date.now() - gen.getTime() > 180000) : true;
+  document.getElementById("meta").innerHTML =
+    `<span class="dot ${stale ? "stale" : "live"}"></span>updated ${gen ? gen.toLocaleString() : "?"}`;
+
+  const totalVol = universe.reduce((s, c) => s + (c.day_ntl_vlm || 0), 0);
+  const cards = [
+    ["Active coins", fmtNum(universe.length), `cap ${d.config?.max_coins ?? "-"}`],
+    ["Total 24h notional", fmtUsd(totalVol), "across universe"],
+    ["Alerts 24h", fmtNum(a.last_24h), `${fmtNum(a.last_1h)} in last 1h`],
+    ["Alerts total", fmtNum(a.total), `markout-complete ${fmtNum(a.markouts?.fully_covered_alerts)}`],
+    ["Trades stream", fmtNum(streams["hl:trades"]), `l2 ${fmtNum(streams["hl:l2Book"])} / ctx ${fmtNum(streams["hl:activeAssetCtx"])}`],
+    ["Data volume", data.used_gb != null ? data.used_gb + " GB" : "-", data.free_gb != null ? data.free_gb + " GB free" : ""],
+  ];
+  document.getElementById("cards").innerHTML = cards.map(([l, v, s]) =>
+    `<div class="card"><div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s || ""}</div></div>`).join("");
+
+  const top = universe.slice(0, 15);
+  const labels = top.map(c => c.coin), vals = top.map(c => c.day_ntl_vlm || 0);
+  if (volChart) { volChart.data.labels = labels; volChart.data.datasets[0].data = vals; volChart.update(); }
+  else {
+    volChart = new Chart(document.getElementById("volChart"), {
+      type: "bar",
+      data: { labels, datasets: [{ data: vals, backgroundColor: "#4ea1ff" }] },
+      options: { plugins: { legend: { display: false } },
+        scales: { x: { ticks: { color: "#8aa0b8" }, grid: { display: false } },
+          y: { ticks: { color: "#8aa0b8", callback: v => fmtUsd(v) }, grid: { color: "#243044" } } } }
+    });
+  }
+
+  document.querySelector("#alertsTbl tbody").innerHTML = (a.recent || []).map(r =>
+    `<tr><td>${r.coin}</td><td class="z ${Math.abs(r.z) > 5 ? "hot" : ""}">${(r.z ?? 0).toFixed(2)}</td>
+     <td>${((r.ret ?? 0) * 100).toFixed(2)}%</td><td>${fmtUsd(r.notional)}</td><td>${ago(r.ts)}</td></tr>`).join("")
+     || `<tr><td colspan="5" class="meta">no alerts yet</td></tr>`;
+
+  const perCoin = a.per_coin || {};
+  document.querySelector("#coinTbl tbody").innerHTML = universe.map(c => {
+    const b = bars[c.coin] || {};
+    return `<tr><td>${c.coin}</td><td>${fmtUsd(c.day_ntl_vlm)}</td><td>${fmtNum(b.bars_24h || 0)}</td>
+      <td>${ago(b.last_bar_ts)}</td><td>${fmtNum(perCoin[c.coin] || 0)}</td>
+      <td><span class="badge ${c.subscribed ? "on" : "off"}">${c.subscribed ? "live" : "off"}</span></td></tr>`;
+  }).join("") || `<tr><td colspan="6" class="meta">no universe data</td></tr>`;
+}
+
+async function tick() {
+  try {
+    const r = await fetch("stats.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+  } catch (e) {
+    document.getElementById("meta").innerHTML = `<span class="err">stats unavailable: ${e.message}</span>`;
+  }
+}
+tick();
+setInterval(tick, 30000);
+</script>
+</body>
+</html>

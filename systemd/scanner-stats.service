@@ -1,0 +1,11 @@
+[Unit]
+Description=Scanner stats exporter (publishes stats.json to S3)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=scanner
+Group=scanner
+WorkingDirectory=/opt/scanner/app
+EnvironmentFile=/opt/scanner/.env.production
+ExecStart=/opt/scanner/app/.venv/bin/python -u -m scanner.stats_exporter

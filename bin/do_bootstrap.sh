@@ -150,9 +150,34 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+# Stats exporter: publishes stats.json to the dashboard S3 bucket every minute.
+cat > /etc/systemd/system/scanner-stats.service <<EOF
+[Unit]
+Description=Scanner stats exporter (publishes stats.json to S3)
+After=network-online.target
+[Service]
+Type=oneshot
+User=scanner
+Group=scanner
+WorkingDirectory=$APP/app
+EnvironmentFile=$APP/.env.production
+ExecStart=$APP/app/.venv/bin/python -u -m scanner.stats_exporter
+EOF
+
+cat > /etc/systemd/system/scanner-stats.timer <<'EOF'
+[Unit]
+Description=Run scanner stats exporter every minute
+[Timer]
+OnCalendar=*:0/1
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 systemctl enable --now scanner-valkey.service
 systemctl enable scanner-archive.timer
+systemctl enable --now scanner-stats.timer
 
 # 6. Force STS regional endpoint for any boto3 call from this host
 install -d -o scanner -g scanner $APP/.aws
