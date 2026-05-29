@@ -1,8 +1,8 @@
 [Unit]
-Description=Run scanner archive job periodically
+Description=Run scanner archive nightly
 
 [Timer]
-OnCalendar=hourly
+OnCalendar=*-*-* 02:00:00 UTC
 Persistent=true
 
 [Install]

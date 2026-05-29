@@ -747,7 +747,8 @@ resource "aws_db_subnet_group" "main" {
 resource "aws_db_instance" "pg" {
   identifier              = "hl-scanner-pg"
   engine                  = "postgres"
-  engine_version          = "16.4"
+  # SE-approved update: ap-northeast-1 does not offer postgres 16.4; use 16.14.
+  engine_version          = "16.14"
   instance_class          = "db.t4g.micro"
   allocated_storage       = 20
   max_allocated_storage   = 100

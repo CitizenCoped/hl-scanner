@@ -1,12 +1,21 @@
 [Unit]
-Description=Scanner Ingestor
-After=network.target
+Description=Scanner ingestor
+Requires=scanner-valkey.service
+After=scanner-valkey.service network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/hl-scanner
-ExecStart=/usr/bin/python -m scanner.ws_client
+User=scanner
+Group=scanner
+WorkingDirectory=/opt/scanner/app
+EnvironmentFile=/opt/scanner/.env.production
+ExecStart=/opt/scanner/app/.venv/bin/python -u -m scanner.ws_client
 Restart=always
+RestartSec=5s
+StartLimitBurst=10
+StartLimitIntervalSec=60
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

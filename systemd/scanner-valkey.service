@@ -1,11 +1,16 @@
 [Unit]
-Description=Scanner Valkey
+Description=Scanner Valkey sidecar
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/valkey-server
+User=scanner
+Group=scanner
+RuntimeDirectory=valkey
+RuntimeDirectoryMode=0770
+ExecStart=/usr/bin/valkey-server /etc/valkey/valkey.conf
 Restart=always
+RestartSec=2s
 
 [Install]
 WantedBy=multi-user.target

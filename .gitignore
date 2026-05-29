@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 .env
+.env.production
 *.log
 dist/
 build/
@@ -12,3 +13,6 @@ build/
 .terraform/
 *.tfstate
 *.tfstate.backup
+.tmp/
+*.egg-info/
+ec2-ssh.sh

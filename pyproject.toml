@@ -1,11 +1,28 @@
 [project]
 name = "hl-scanner"
 version = "0.1.0"
-description = "High-level scanner"
+description = "Hyperliquid scanner"
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = "==3.12.*"
+dependencies = [
+    "websockets",
+    "orjson",
+    "polars",
+    "duckdb",
+    "pyarrow",
+    "redis",
+    "psycopg[binary]",
+    "pydantic",
+    "requests",
+    "boto3",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

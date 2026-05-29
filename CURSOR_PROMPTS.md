@@ -6,7 +6,8 @@ Paste these into Cursor's agent in order. Wait for each prompt's smoke test to p
 
 ## Prompt 1 — Project skeleton
 
-Read `BUILD_GUIDE.md`. Create the project structure described in §9 exactly: `pyproject.toml` targeting Python 3.12 with uv, empty module files in `src/scanner/`, and the `infra/`, `bin/`, `systemd/`, `sql/` directories. Initialize `pyproject.toml` with these deps: websockets, orjson, polars, duckdb, pyarrow, redis, psycopg[binary], pydantic, requests, boto3. Run `uv sync`.
+Read `BUILD_GUIDE.md`. Create the project structure des
+cribed in §9 exactly: `pyproject.toml` targeting Python 3.12 with uv, empty module files in `src/scanner/`, and the `infra/`, `bin/`, `systemd/`, `sql/` directories. Initialize `pyproject.toml` with these deps: websockets, orjson, polars, duckdb, pyarrow, redis, psycopg[binary], pydantic, requests, boto3. Run `uv sync`.
 
 **Smoke test:** `uv run python -c "import scanner; print('ok')"` succeeds.
 
