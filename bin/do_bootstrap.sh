@@ -59,6 +59,14 @@ if [[ -n "$DEV" ]]; then
 fi
 
 # 4. Valkey sidecar (Unix socket)
+# The valkey-server deb ships and auto-enables its own valkey-server.service.
+# That stock unit runs as user `valkey` (which cannot read our root:scanner
+# valkey.conf) so it crash-loops; worse, it declares RuntimeDirectory=valkey,
+# so each failed start/stop deletes the shared /run/valkey out from under our
+# scanner-valkey sidecar, destroying the socket. Mask it so only our unit owns
+# /run/valkey.
+systemctl disable --now valkey-server.service 2>/dev/null || true
+systemctl mask valkey-server.service
 install -d -o scanner -g scanner $SOCKET_DIR $DATA/valkey
 cat > /etc/valkey/valkey.conf <<EOF
 bind 127.0.0.1 -::1
