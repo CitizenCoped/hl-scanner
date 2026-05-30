@@ -345,12 +345,21 @@ resource "aws_sns_topic_subscription" "email" {
 resource "aws_cloudwatch_metric_alarm" "ec2_down" {
   alarm_name          = "hl-scanner-ec2-down"
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 1
+  evaluation_periods  = 2
   metric_name         = "StatusCheckFailed_Instance"
   namespace           = "AWS/EC2"
   period              = 60
   statistic           = "Maximum"
   threshold           = 1
   dimensions          = { InstanceId = aws_instance.scanner.id }
-  alarm_actions       = [aws_sns_topic.alerts.arn]
+  # Email AND auto-reboot the box when the instance reachability check fails
+  # (an OS-level hang, exactly the failure we hit on 2026-05-30). The
+  # arn:aws:automate:<region>:ec2:reboot action lets CloudWatch reboot the
+  # instance without manual intervention, which is required for the
+  # month-long no-downtime durability target. (System-status failures are
+  # auto-recovered by the Nitro platform on c7g by default.)
+  alarm_actions = [
+    aws_sns_topic.alerts.arn,
+    "arn:aws:automate:${var.region}:ec2:reboot",
+  ]
 }
