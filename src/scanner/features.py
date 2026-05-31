@@ -18,7 +18,7 @@ def compute_zscores(now_ts: int) -> list[dict]:
              (ret - avg(ret) OVER w) / nullif(stddev_samp(ret) OVER w, 0) AS z,
              count(ret) OVER w AS n
       FROM r
-      WINDOW w AS (PARTITION BY coin, h ORDER BY ts ROWS BETWEEN 59 PRECEDING AND 0 PRECEDING)
+      WINDOW w AS (PARTITION BY coin, h ORDER BY ts ROWS BETWEEN 60 PRECEDING AND 1 PRECEDING)
       QUALIFY ts = ? AND abs(z) > 4.0 AND n >= 30
     """,
         [now_ts, now_ts],
