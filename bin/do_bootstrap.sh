@@ -58,6 +58,20 @@ if [[ -n "$DEV" ]]; then
   chown scanner:scanner $DATA
 fi
 
+# 3b. Swap — the box has 16 GiB RAM and no swap. A leaking process (e.g. the
+# ingestor) can OOM-freeze the whole instance, tripping the reachability check
+# and forcing a reboot. A small swapfile with low swappiness gives the kernel
+# headroom to degrade gracefully instead of going unreachable.
+if ! swapon --show | grep -q /swapfile; then
+  dd if=/dev/zero of=/swapfile bs=1M count=4096 status=none
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+sysctl -w vm.swappiness=10 >/dev/null
+grep -q '^vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf
+
 # 4. Valkey sidecar (Unix socket)
 # The valkey-server deb ships and auto-enables its own valkey-server.service.
 # That stock unit runs as user `valkey` (which cannot read our root:scanner
@@ -113,6 +127,15 @@ for svc in ingestor feature-worker alerter markouts; do
     feature-worker) module="bar_builder" ;;
     *) module="${svc//-/_}" ;;
   esac
+  # Per-service memory safety net (cgroup v2): if a service leaks, the kernel
+  # restarts just that service instead of OOM-freezing the whole instance.
+  # The ingestor has a known steady-state leak; the alerter spikes during its
+  # per-minute DuckDB scan over Parquet. Sized well above normal usage.
+  case "$svc" in
+    ingestor) mem_high=2500M; mem_max=3G ;;
+    alerter)  mem_high=3G;    mem_max=4G ;;
+    *)        mem_high=768M;  mem_max=1G ;;
+  esac
   cat > /etc/systemd/system/scanner-$svc.service <<EOF
 [Unit]
 Description=Scanner $svc
@@ -127,6 +150,8 @@ EnvironmentFile=$APP/.env.production
 ExecStart=$APP/app/.venv/bin/python -u -m scanner.$module
 Restart=always
 RestartSec=5s
+MemoryHigh=$mem_high
+MemoryMax=$mem_max
 StartLimitBurst=10
 StartLimitIntervalSec=60
 StandardOutput=append:$APP/logs/$svc.log
