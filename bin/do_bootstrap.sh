@@ -133,10 +133,10 @@ for svc in ingestor feature-worker alerter markouts; do
   # per-minute DuckDB scan over Parquet. Sized well above normal usage.
   case "$svc" in
     ingestor) mem_high=2500M; mem_max=3G ;;
-    # The alerter's per-minute z-score scan reads the 7-day Parquet window
-    # (~6 GB peak even after dt-partition pruning); sized to fit it so the
-    # cgroup does not OOM-kill it mid-query.
-    alerter)  mem_high=6G;    mem_max=7G ;;
+    # The alerter's per-minute z-score scan reads the 7-day Parquet window.
+    # With nightly compaction (one day.parquet per coin/day) this is ~0.5 GB;
+    # headroom covers the current day's un-compacted per-minute files.
+    alerter)  mem_high=2G;    mem_max=3G ;;
     *)        mem_high=768M;  mem_max=1G ;;
   esac
   cat > /etc/systemd/system/scanner-$svc.service <<EOF
@@ -186,6 +186,34 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+# Compaction: merge each closed day's per-minute bar files into one
+# coin=X/dt=Y/day.parquet so the small-files count stays bounded and the
+# alerter/stats DuckDB scans stay cheap. Runs nightly before the S3 archive.
+cat > /etc/systemd/system/scanner-compact.service <<EOF
+[Unit]
+Description=Scanner Parquet compaction (per-minute -> per-day)
+[Service]
+Type=oneshot
+User=scanner
+Group=scanner
+WorkingDirectory=$APP/app
+EnvironmentFile=$APP/.env.production
+ExecStart=$APP/app/.venv/bin/python -u -m scanner.compact
+MemoryMax=2G
+StandardOutput=append:$APP/logs/compact.log
+StandardError=append:$APP/logs/compact.log
+EOF
+
+cat > /etc/systemd/system/scanner-compact.timer <<'EOF'
+[Unit]
+Description=Run scanner Parquet compaction nightly
+[Timer]
+OnCalendar=*-*-* 01:00:00 UTC
+Persistent=true
+[Install]
+WantedBy=timers.target
+EOF
+
 # Stats exporter: publishes stats.json to the dashboard S3 bucket every minute.
 cat > /etc/systemd/system/scanner-stats.service <<EOF
 [Unit]
@@ -213,6 +241,7 @@ EOF
 systemctl daemon-reload
 systemctl enable --now scanner-valkey.service
 systemctl enable scanner-archive.timer
+systemctl enable --now scanner-compact.timer
 systemctl enable --now scanner-stats.timer
 
 # 6. Force STS regional endpoint for any boto3 call from this host
