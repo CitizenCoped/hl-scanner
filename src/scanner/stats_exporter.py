@@ -71,6 +71,11 @@ def _universe() -> list[dict]:
 def _bar_coverage() -> dict:
     """Per-coin bar coverage for the last 24h from local Parquet."""
     cutoff = int(time.time()) - 86400
+    # Prune by the `dt` hive partition (YYYY-MM-DD from the path) so DuckDB only
+    # opens the last ~2 days of files. Filtering on `ts` alone forces a read of
+    # the entire (unbounded) dataset, which OOM-kills the exporter once the
+    # file count grows large.
+    cutoff_date = dt.datetime.fromtimestamp(cutoff, dt.timezone.utc).strftime("%Y-%m-%d")
     try:
         con = duckdb.connect()
         rows = con.execute(
@@ -80,10 +85,10 @@ def _bar_coverage() -> dict:
                    max(ts) AS last_bar_ts,
                    sum(c * v) AS notional_24h
             FROM read_parquet(?, hive_partitioning=true)
-            WHERE ts >= ?
+            WHERE dt >= ? AND ts >= ?
             GROUP BY coin
             """,
-            [f"{BARS_ROOT}/coin=*/dt=*/*.parquet", cutoff],
+            [f"{BARS_ROOT}/coin=*/dt=*/*.parquet", cutoff_date, cutoff],
         ).fetchall()
         return {
             r[0]: {

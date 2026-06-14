@@ -133,7 +133,10 @@ for svc in ingestor feature-worker alerter markouts; do
   # per-minute DuckDB scan over Parquet. Sized well above normal usage.
   case "$svc" in
     ingestor) mem_high=2500M; mem_max=3G ;;
-    alerter)  mem_high=3G;    mem_max=4G ;;
+    # The alerter's per-minute z-score scan reads the 7-day Parquet window
+    # (~6 GB peak even after dt-partition pruning); sized to fit it so the
+    # cgroup does not OOM-kill it mid-query.
+    alerter)  mem_high=6G;    mem_max=7G ;;
     *)        mem_high=768M;  mem_max=1G ;;
   esac
   cat > /etc/systemd/system/scanner-$svc.service <<EOF
