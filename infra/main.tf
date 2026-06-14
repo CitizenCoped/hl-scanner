@@ -136,6 +136,18 @@ resource "aws_iam_role_policy" "scanner_s3" {
     }]
   })
 }
+resource "aws_iam_role_policy" "scanner_sns" {
+  name = "hl-scanner-sns-publish"
+  role = aws_iam_role.scanner.id
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect   = "Allow",
+      Action   = "sns:Publish",
+      Resource = aws_sns_topic.alerts.arn
+    }]
+  })
+}
 resource "aws_iam_instance_profile" "scanner" {
   name = "hl-scanner"
   role = aws_iam_role.scanner.name

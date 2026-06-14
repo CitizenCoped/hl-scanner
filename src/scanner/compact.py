@@ -22,12 +22,38 @@ Safety:
 
 import datetime as dt
 import os
+import socket
 from pathlib import Path
 
+import boto3
 import duckdb
 
 ROOT = Path(os.getenv("SCANNER_BARS_ROOT", "/opt/scanner/data/bars"))
 COMPACTED = "day.parquet"
+SNS_TOPIC_ARN = os.getenv("ALERT_SNS_TOPIC_ARN", "").strip()
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
+
+
+def _notify(ok: bool, summary: str) -> None:
+    """Publish exactly one status message per run to SNS (email). Successful
+    runs are a heartbeat; failures are prefixed with ALERT for visibility."""
+    if not SNS_TOPIC_ARN:
+        return
+    status = "success" if ok else "fail"
+    subject = f"compact.py {status}" if ok else f"ALERT compact.py {status}"
+    prefix = "" if ok else "ALERT "
+    message = (
+        f"{prefix}compact.py {status}\n\n"
+        f"{summary}\n\n"
+        f"host: {socket.gethostname()}\n"
+        f"time: {dt.datetime.now(dt.timezone.utc).isoformat()}"
+    )
+    try:
+        boto3.client("sns", region_name=AWS_REGION).publish(
+            TopicArn=SNS_TOPIC_ARN, Subject=subject[:100], Message=message
+        )
+    except Exception as e:  # noqa: BLE001 - notification must never crash the job
+        print(f"sns notify failed: {e}", flush=True)
 
 
 def _sql_str(p: Path) -> str:
@@ -74,11 +100,12 @@ def _compact_partition(part: Path) -> bool:
     return True
 
 
-def main() -> None:
-    if not ROOT.exists():
-        return
+def _run() -> tuple[int, int, int, str | None]:
     today = dt.datetime.now(dt.timezone.utc).date().isoformat()
-    parts = removed = 0
+    parts = removed = failures = 0
+    first_error: str | None = None
+    if not ROOT.exists():
+        return parts, removed, failures, first_error
     for coin_dir in sorted(ROOT.glob("coin=*")):
         for part in sorted(coin_dir.glob("dt=*")):
             if part.name[3:] >= today:
@@ -91,8 +118,27 @@ def main() -> None:
                     parts += 1
                     removed += n - 1  # n per-minute files -> 1 day file
             except Exception as e:  # noqa: BLE001 - never abort the whole run
+                failures += 1
+                if first_error is None:
+                    first_error = f"{coin_dir.name}/{part.name}: {e}"
                 print(f"compact failed for {part}: {e}", flush=True)
-    print(f"compacted {parts} partitions, removed {removed} files", flush=True)
+    return parts, removed, failures, first_error
+
+
+def main() -> None:
+    # Exactly one SNS status message per run (a nightly heartbeat on success,
+    # an ALERT on any failure) — never one per partition.
+    try:
+        parts, removed, failures, first_error = _run()
+    except Exception as e:  # noqa: BLE001 - report unexpected crashes too
+        _notify(ok=False, summary=f"compaction run crashed: {e}")
+        raise
+    summary = f"compacted {parts} partitions, removed {removed} files"
+    print(summary, flush=True)
+    if failures:
+        _notify(ok=False, summary=f"{failures} partition(s) failed; first: {first_error}. {summary}")
+    else:
+        _notify(ok=True, summary=summary)
 
 
 if __name__ == "__main__":
