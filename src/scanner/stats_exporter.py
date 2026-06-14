@@ -21,6 +21,33 @@ DASHBOARD_BUCKET = os.getenv("DASHBOARD_BUCKET", "").strip()
 MIN_24H_NOTIONAL = float(os.getenv("HL_MIN_24H_NOTIONAL", "10000000"))
 MAX_COINS = int(os.getenv("HL_MAX_COINS", "180"))
 DEFAULT_VALKEY_SOCKET = "/run/valkey/valkey.sock"
+AWS_REGION = os.getenv("AWS_REGION", "ap-northeast-1")
+ALERTER_HEARTBEAT = os.getenv("ALERTER_HEARTBEAT", "/opt/scanner/data/alerter.heartbeat")
+METRIC_NAMESPACE = "HLScanner"
+STALE_SENTINEL = 99999  # published when a freshness value can't be computed (so alarms fire)
+
+
+def _publish_metrics(stats: dict) -> None:
+    """Publish pipeline-liveness metrics so CloudWatch can alarm (once, with
+    native de-dup) when the scanner is 'up but not working'."""
+    now = int(time.time())
+    bars = stats.get("bars", {})
+    last_bars = [b["last_bar_ts"] for b in bars.values() if b.get("last_bar_ts")]
+    bar_age = (now - max(last_bars)) if last_bars else STALE_SENTINEL
+    try:
+        hb_age = now - int(os.path.getmtime(ALERTER_HEARTBEAT))
+    except OSError:
+        hb_age = STALE_SENTINEL
+    try:
+        boto3.client("cloudwatch", region_name=AWS_REGION).put_metric_data(
+            Namespace=METRIC_NAMESPACE,
+            MetricData=[
+                {"MetricName": "SecondsSinceLastBar", "Value": float(bar_age), "Unit": "Seconds"},
+                {"MetricName": "SecondsSinceAlerterLoop", "Value": float(hb_age), "Unit": "Seconds"},
+            ],
+        )
+    except Exception as e:  # noqa: BLE001 - never let metrics break the export
+        print(f"metric publish failed: {e}", flush=True)
 
 
 def _valkey_client() -> redis.Redis:
@@ -164,6 +191,7 @@ def build_stats() -> dict:
 
 def main() -> None:
     stats = build_stats()
+    _publish_metrics(stats)
     payload = json.dumps(stats, separators=(",", ":")).encode()
     if not DASHBOARD_BUCKET:
         print(payload.decode())

@@ -375,3 +375,38 @@ resource "aws_cloudwatch_metric_alarm" "ec2_down" {
     "arn:aws:automate:${var.region}:ec2:reboot",
   ]
 }
+
+# Pipeline-liveness deadman alarms. The stats exporter publishes these custom
+# metrics every minute; CloudWatch's ALARM-state transition gives once-per-
+# incident de-dup (no flooding) and emails the ops topic. treat_missing_data =
+# "breaching" so the exporter itself dying also alarms. Catches "up but not
+# working" — the silent failure mode behind the 2026-06 alert gaps.
+resource "aws_cloudwatch_metric_alarm" "bars_stale" {
+  alarm_name          = "hl-scanner-bars-stale"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "SecondsSinceLastBar"
+  namespace           = "HLScanner"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 600
+  treat_missing_data  = "breaching"
+  alarm_description   = "No fresh 1-min bars for >10 min: ingestor or feature-worker stalled."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "alerter_stalled" {
+  alarm_name          = "hl-scanner-alerter-stalled"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "SecondsSinceAlerterLoop"
+  namespace           = "HLScanner"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 600
+  treat_missing_data  = "breaching"
+  alarm_description   = "Alerter loop heartbeat stale >10 min: alerter stalled, no alerts being produced."
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+}
